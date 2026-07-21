@@ -1,0 +1,596 @@
+================================================================================
+  PRODUCT REQUIREMENTS DOCUMENT (PRD)
+  GavelPro — Online Auction Platform
+  Version: 1.0
+  Date: July 12, 2026
+================================================================================
+
+--------------------------------------------------------------------------------
+1. OVERVIEW
+--------------------------------------------------------------------------------
+
+Product Name:    GavelPro
+Product Type:    Full-stack web application
+Summary:         GavelPro is a multi-role online auction platform where sellers
+                 list items for auction, buyers compete in real-time bidding, and
+                 admins govern the platform. It features an AI-powered price
+                 prediction engine, automated auction closing with commission
+                 calculation, in-app notifications, and transactional email
+                 delivery.
+
+--------------------------------------------------------------------------------
+2. GOALS AND OBJECTIVES
+--------------------------------------------------------------------------------
+
+  - Provide a trustworthy, transparent marketplace for buying and selling items
+    via timed auctions.
+  - Give sellers data-driven pricing guidance to maximise bidding activity.
+  - Give buyers real-time competitive intelligence to inform bid decisions.
+  - Automate the full auction lifecycle: creation → approval → live → closed →
+    payout notification.
+  - Enable admins to govern users, listings, categories, disputes, and platform
+    configuration from a single dashboard.
+
+--------------------------------------------------------------------------------
+3. USER ROLES
+--------------------------------------------------------------------------------
+
+  3.1  PUBLIC (unauthenticated)
+       - Browse the homepage and live auction listings.
+       - View individual auction details (item info, current bid, time left).
+       - Register a new account (as Buyer or Seller).
+       - Log in to an existing account.
+
+  3.2  BUYER
+       - Place bids on live auctions.
+       - View a personal dashboard showing active bids, won auctions, and
+         total amount spent.
+       - Receive in-app and email notifications when outbid or when an auction
+         is won.
+       - Raise disputes against auctions.
+       - View AI bid insight on auction detail pages.
+
+  3.3  SELLER
+       - Create, edit, and delete auction listings (with image upload or URL).
+       - View per-auction bid history and current status.
+       - Receive AI price prediction assistance when creating an auction.
+       - Receive in-app and email notifications when an auction ends (sold or
+         no-sale), including payout details after commission.
+       - Manage their public profile (company name, bio, avatar, address).
+
+  3.4  ADMIN
+       - Full access to all Seller capabilities.
+       - Approve or reject pending auction listings.
+       - Toggle live/offline status of any auction.
+       - Manage all users: suspend, unsuspend, or delete accounts.
+       - Manage categories: create, edit, toggle active/inactive, delete.
+       - Resolve disputes with internal admin notes.
+       - Configure platform-wide settings (commission rate, minimum bid
+         increment, default auction duration).
+       - View full analytics reports with charts for users, auctions, bids,
+         and top categories.
+
+--------------------------------------------------------------------------------
+4. TECH STACK
+--------------------------------------------------------------------------------
+
+  Backend
+  -------
+  - Runtime:        Node.js
+  - Framework:      Express 4
+  - Database:       PostgreSQL (connection pooling via pg)
+  - Authentication: JWT (jsonwebtoken) + bcryptjs (password hashing)
+  - File Uploads:   multer (disk storage, 5 MB limit)
+  - Email:          nodemailer (SMTP)
+  - Validation:     express-validator
+  - Scheduling:     setInterval cron (auction closer, 60-second interval)
+
+  Frontend
+  --------
+  - Framework:      React 18
+  - Build Tool:     Vite 5
+  - Routing:        React Router v6
+  - HTTP Client:    Axios (interceptor auto-attaches JWT from localStorage)
+  - Styling:        Tailwind CSS 3
+  - Icons:          Bootstrap Icons
+  - Charts:         Recharts (admin reports)
+  - Toasts:         react-hot-toast
+
+--------------------------------------------------------------------------------
+5. DATABASE SCHEMA
+--------------------------------------------------------------------------------
+
+  5.1  users
+       - id (UUID, PK)
+       - email (unique, required)
+       - password_hash
+       - full_name
+       - role: Admin | Seller | Buyer
+       - company_name, bio, profile_picture_url, address
+       - is_email_verified (boolean)
+       - email_verification_code, email_verification_expiry
+       - two_factor_otp_code, two_factor_otp_expiry
+       - failed_login_attempts, lockout_end
+       - created_at, updated_at
+
+  5.2  categories
+       - id (serial, PK)
+       - name (unique)
+       - icon (Bootstrap Icons class)
+       - description
+       - is_active
+       - created_at
+
+  5.3  auctions
+       - id (serial, PK)
+       - title, description, category
+       - starting_bid, current_bid, minimum_increment, bid_count
+       - starts_at, ends_at, closed_at
+       - image_url
+       - seller_id (FK → users)
+       - auctioneer_name
+       - is_featured, is_live
+       - status: pending | live | ended | cancelled
+       - winner_id (FK → users)
+       - created_at, updated_at
+
+  5.4  bids
+       - id (serial, PK)
+       - amount
+       - timestamp
+       - user_id (FK → users)
+       - auction_item_id (FK → auctions)
+
+  5.5  disputes
+       - id (serial, PK)
+       - title, description
+       - raised_by_user_id (FK → users)
+       - auction_item_id (FK → auctions)
+       - status: Open | Resolved | Closed
+       - admin_note
+       - created_at, resolved_at
+
+  5.6  platform_settings
+       - id (serial, PK)
+       - key (unique): CommissionRate | MinBidIncrement | AuctionDurationDays
+       - value
+       - description
+       - updated_at
+
+  5.7  auction_results
+       - id (serial, PK)
+       - auction_id (FK → auctions)
+       - winner_id (FK → users)
+       - winning_bid
+       - commission_rate, commission_amount, seller_payout
+       - closed_at, notified_at
+
+  5.8  notifications
+       - id (serial, PK)
+       - user_id (FK → users)
+       - type, title, message
+       - auction_id (FK → auctions, nullable)
+       - is_read
+       - created_at
+
+--------------------------------------------------------------------------------
+6. FEATURE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+  6.1  AUTHENTICATION
+  -------------------
+  FR-AUTH-1   Registration: Users provide full name, email, password (min 6
+              chars), password confirmation, and role (Buyer or Seller).
+              Duplicate emails are rejected. JWT is issued on success.
+
+  FR-AUTH-2   Login: Email + password authentication. On success, failed
+              attempt counter resets and JWT is returned.
+
+  FR-AUTH-3   Account lockout: After 5 consecutive failed login attempts,
+              the account is locked for 15 minutes.
+
+  FR-AUTH-4   Admin suspension: Admins can lock an account indefinitely
+              (lockout_end set to far future).
+
+  FR-AUTH-5   JWT: Signed with HS256, payload contains user ID, email, role,
+              and full name. Stored in localStorage as "gp_token". Axios
+              attaches it as Bearer token on all API requests.
+
+  FR-AUTH-6   Session hydration: On app load, AuthContext calls GET /api/auth/me
+              to restore user state from a valid stored token.
+
+  NOTE: Email verification and 2FA OTP infrastructure is built into the database
+        schema and email service, but is not yet wired into auth routes.
+
+
+  6.2  AUCTION LIFECYCLE
+  ----------------------
+  FR-AUC-1    Creation: Sellers provide title (max 100 chars), description,
+              category (from active list), starting bid, minimum increment,
+              start/end datetime, and an image (file upload up to 5 MB, or
+              URL). New listings default to status "pending", is_live = false.
+
+  FR-AUC-2    Approval: Admins approve a pending listing → status becomes
+              "live", is_live = true. Admins can also reject/delete listings.
+
+  FR-AUC-3    Live state: An auction is visible to buyers and accepts bids only
+              when is_live = true and the current time is within starts_at and
+              ends_at.
+
+  FR-AUC-4    Bidding rules:
+              - Bid amount must be ≥ current_bid + minimum_increment.
+              - Sellers cannot bid on their own auctions.
+              - Bidding on non-live or expired auctions is rejected.
+              - Each bid uses a row-level FOR UPDATE lock to prevent race
+                conditions.
+
+  FR-AUC-5    Automatic closing: The auctionCloser service runs every 60
+              seconds. For every auction where ends_at has passed and
+              is_live = true and status != "ended":
+              1. Identifies the highest bid (winner).
+              2. Calculates commission (configurable %, default 5%).
+              3. Calculates seller payout = winning_bid - commission.
+              4. Updates auction: status = "ended", is_live = false,
+                 winner_id, closed_at.
+              5. Writes a permanent record to auction_results.
+              6. Creates in-app notifications for winner and seller.
+              7. Sends styled HTML emails to winner and seller.
+
+  FR-AUC-6    No-bid close: If an auction ends with zero bids, the seller
+              receives a "no bids" notification and email with a prompt to
+              relist at a lower price.
+
+  FR-AUC-7    Editing: Sellers can edit their own auctions. Admins can edit
+              any auction. Live auctions that have received bids cannot be
+              deleted by sellers (admins can always delete).
+
+  FR-AUC-8    Featured auctions: Admins can mark auctions as featured; these
+              are sorted first in the public listings.
+
+  FR-AUC-9    Filtering and pagination: Public auction list supports filtering
+              by category, free-text search (title/description), featured flag,
+              and pagination (default 12 per page).
+
+
+  6.3  AI PRICE PREDICTION ENGINE
+  --------------------------------
+  FR-AI-1     Statistical model: No external ML service. The engine queries
+              historical auction data (same category, ended, bid_count > 0,
+              final bid > starting bid, up to 100 most recent).
+
+  FR-AI-2     Algorithm:
+              1. Compute bid multiplier = final_bid / starting_bid for each
+                 historical auction.
+              2. Calculate mean and standard deviation of multipliers.
+              3. Apply a duration adjustment factor:
+                 durationFactor = (min(durationDays, 30) / 7) ^ 0.15
+              4. predicted_price = starting_bid × adjusted_mean
+              5. Low/high band = ±1 std dev.
+              6. Confidence = min(95%, 50 + dataPoints × 0.8)
+              7. Competitiveness score (0–100) based on avg bid count and
+                 recent 30-day bid activity.
+
+  FR-AI-3     Baseline: When no historical data exists, a conservative 15% +
+              (durationDays × 1%) lift estimate is returned with 30%
+              confidence.
+
+  FR-AI-4     Seller mode (Create Auction page):
+              - Widget debounces 600ms after category or starting bid changes.
+              - Shows predicted final price, low-high range, avg historical
+                bids, and a competitiveness bar.
+              - Warns if starting bid > 80% of predicted final price.
+              - Suggests an optimal starting bid (~40% of predicted final).
+              - Expandable for full insight text and confidence badge.
+
+  FR-AI-5     Buyer mode (Auction Detail page):
+              - Shows predicted final price and gap from current bid.
+              - Classifies bid status as: Leading / Close Race /
+                Likely More Bids.
+              - Expandable for detailed insight and confidence badge.
+
+  FR-AI-6     Market insight endpoint: GET /api/ai/market-insight/:category
+              returns aggregate category stats (avg bids, avg price lift,
+              highest/lowest sale, competitiveness score).
+
+
+  6.4  NOTIFICATIONS
+  ------------------
+  FR-NOT-1    In-app: NotificationBell component polls GET /api/notifications
+              every 30 seconds. Unread count shown as a badge. Dropdown lists
+              recent notifications with type-specific icons.
+
+  FR-NOT-2    Notification types:
+              - auction_won    → buyer: "You won an auction"
+              - auction_sold   → seller: sold with winning bid + payout
+              - auction_no_sale → seller: ended without bids
+              - (outbid not yet emitted but infrastructure is ready)
+
+  FR-NOT-3    Actions: Mark individual as read, mark all as read, delete.
+              Clicking a notification with an auction_id navigates to the
+              relevant auction page.
+
+  FR-NOT-4    Email: HTML-formatted emails are sent by the auctionCloser for
+              won and sold events. Email failure does not roll back the DB
+              transaction.
+
+
+  6.5  ADMIN FEATURES
+  -------------------
+  FR-ADM-1    Dashboard stats: Total users (by role), suspended users, total
+              auctions (live, ended), total bids, and total bid value.
+              Recent 5 registrations listed.
+
+  FR-ADM-2    User management: View all users, suspend/unsuspend, delete.
+              Suspended accounts are immediately locked.
+
+  FR-ADM-3    Listing approval: AdminListings shows pending auctions.
+              Approve → goes live. Reject → deleted.
+
+  FR-ADM-4    Auction management: AdminAuctions shows all auctions. Toggle
+              live status, delete any auction.
+
+  FR-ADM-5    Category management: Create, edit icon/description, toggle
+              active/inactive, delete. Inactive categories are hidden from the
+              Create Auction form.
+
+  FR-ADM-6    Dispute management: View all disputes, update status, write
+              admin resolution notes.
+
+  FR-ADM-7    Platform settings: Configure CommissionRate (%), MinBidIncrement
+              ($), and AuctionDurationDays via a UI. Changes persist to DB
+              and are picked up by the auctionCloser on its next run.
+
+  FR-ADM-8    Reports: Full analytics including user breakdown, auction
+              totals, bid stats, average bid amount, and top 5 categories
+              by auction count and total value. Visualised with Recharts.
+
+
+  6.6  SELLER FEATURES
+  --------------------
+  FR-SEL-1    Dashboard: Overview cards for total auctions, active listings,
+              won auctions (if any), and total sales value.
+
+  FR-SEL-2    My Auctions: Tabular view of all seller's listings with status
+              badges, bid count, current bid, end time, and quick actions
+              (edit, delete, view detail).
+
+  FR-SEL-3    Auction detail: Per-auction view with full bid history
+              (bidder names, amounts, timestamps), auction result (if ended),
+              including winner name, commission breakdown, and payout.
+
+  FR-SEL-4    Profile: Edit full name, company name, bio, address, and
+              profile picture URL.
+
+
+  6.7  BUYER FEATURES
+  -------------------
+  FR-BUY-1    Auction detail: Full item info, live countdown timer,
+              current bid, bid history (visible to authenticated users),
+              bid placement form, and AI buyer insight widget.
+
+  FR-BUY-2    Buyer dashboard: Summary cards (active bids, auctions won,
+              total spent). Table of all bids with status: Winning /
+              Outbid / Won / Ended (no win).
+
+  FR-BUY-3    Dispute: Buyers can raise a dispute against an auction by
+              providing a title and description.
+
+
+  6.8  PUBLIC / UNAUTHENTICATED
+  ------------------------------
+  FR-PUB-1    Homepage: Hero section with platform stats, category grid
+              with icons, live/featured auction cards.
+
+  FR-PUB-2    Auctions page: Paginated, searchable, category-filterable
+              grid of all live auctions. Each card shows image, title,
+              current bid, time remaining, and bid count.
+
+  FR-PUB-3    Auction detail: Read-only view. Countdown, current bid, and
+              image visible. Bid form prompts unauthenticated users to log
+              in.
+
+--------------------------------------------------------------------------------
+7. API ENDPOINTS SUMMARY
+--------------------------------------------------------------------------------
+
+  Auth
+  ----
+  POST   /api/auth/register
+  POST   /api/auth/login
+  GET    /api/auth/me                       (authenticated)
+
+  Auctions
+  --------
+  GET    /api/auctions                      (public, paginated+filtered)
+  GET    /api/auctions/seller/my            (Seller/Admin)
+  GET    /api/auctions/:id                  (public)
+  POST   /api/auctions                      (Seller/Admin, multipart/form-data)
+  PUT    /api/auctions/:id                  (Seller/Admin)
+  DELETE /api/auctions/:id                  (Seller/Admin)
+  GET    /api/auctions/:id/bids             (authenticated)
+  POST   /api/auctions/:id/bid              (Buyer/Admin)
+  GET    /api/auctions/:id/result           (public)
+
+  Users
+  -----
+  GET    /api/users/profile                 (authenticated)
+  PUT    /api/users/profile                 (authenticated)
+  GET    /api/users/my-bids                 (authenticated)
+  GET    /api/users/won-auctions            (authenticated)
+  GET    /api/users                         (Admin)
+  POST   /api/users/:id/suspend             (Admin)
+  POST   /api/users/:id/unsuspend           (Admin)
+  DELETE /api/users/:id                     (Admin)
+
+  Categories
+  ----------
+  GET    /api/categories                    (public)
+  POST   /api/categories                    (Admin)
+  POST   /api/categories/:id/toggle        (Admin)
+  DELETE /api/categories/:id               (Admin)
+
+  Disputes
+  --------
+  GET    /api/disputes                      (Admin)
+  POST   /api/disputes                      (Buyer)
+  POST   /api/disputes/:id/resolve          (Admin)
+
+  Admin
+  -----
+  GET    /api/admin/dashboard
+  GET    /api/admin/reports
+  GET    /api/admin/auctions
+  POST   /api/admin/auctions/:id/toggle-live
+  POST   /api/admin/auctions/:id/approve
+  DELETE /api/admin/auctions/:id
+  GET    /api/admin/settings
+  PUT    /api/admin/settings/:key
+
+  AI
+  --
+  GET    /api/ai/bid-prediction             ?category=&startingBid=&durationDays=
+  GET    /api/ai/market-insight/:category
+
+  Notifications
+  -------------
+  GET    /api/notifications                 (authenticated)
+  PATCH  /api/notifications/read-all        (authenticated)
+  PATCH  /api/notifications/:id/read        (authenticated)
+  DELETE /api/notifications/:id             (authenticated)
+
+  Static
+  ------
+  GET    /uploads/auctions/:filename        (public static files)
+  GET    /api/health
+
+--------------------------------------------------------------------------------
+8. NON-FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+
+  NFR-1   Security:
+          - Passwords hashed with bcrypt (cost factor 10).
+          - JWT secret loaded from environment variable; never hard-coded.
+          - Account lockout prevents brute-force attacks.
+          - Row-level FOR UPDATE locks prevent bid race conditions.
+          - Input validation on all mutation endpoints via express-validator.
+          - File uploads restricted to images, max 5 MB.
+
+  NFR-2   Performance:
+          - Auction closing cron runs every 60 seconds; not on every request.
+          - AI prediction widget debounces API calls by 600ms to avoid
+            excessive requests during typing.
+          - NotificationBell polls every 30 seconds (not SSE/WebSocket).
+
+  NFR-3   Reliability:
+          - auctionCloser uses database transactions; email failure does not
+            roll back the auction close.
+          - Row locking prevents double-close of the same auction.
+
+  NFR-4   Configurability:
+          - CommissionRate, MinBidIncrement, and AuctionDurationDays are
+            stored in platform_settings and editable by admins at runtime.
+
+  NFR-5   Extensibility:
+          - Two-factor OTP and email verification columns exist in the users
+            table; logic can be activated without schema changes.
+          - Notification type enum is open-ended; new event types can be
+            added by inserting rows.
+
+--------------------------------------------------------------------------------
+9. FRONTEND PAGES & ROUTES
+--------------------------------------------------------------------------------
+
+  Public (PublicLayout)
+  ---------------------
+  /                         HomePage
+  /auctions                 AuctionsPage
+  /auctions/:id             AuctionDetailPage
+  /login                    LoginPage
+  /register                 RegisterPage
+  /access-denied            AccessDenied
+
+  Buyer (PublicLayout, role: Buyer)
+  ---------------------------------
+  /buyer/dashboard          BuyerDashboard
+
+  Seller (SellerLayout, role: Seller | Admin)
+  -------------------------------------------
+  /seller/dashboard         SellerDashboard
+  /seller/my-auctions       MyAuctions
+  /seller/create-auction    CreateAuction
+  /seller/edit-auction/:id  EditAuction
+  /seller/profile           SellerProfile
+  /seller/auction/:id       AuctionDetails (per-auction detail for seller)
+
+  Admin (AdminLayout, role: Admin)
+  --------------------------------
+  /admin/dashboard          AdminDashboard
+  /admin/users              AdminUsers
+  /admin/auctions           AdminAuctions
+  /admin/listings           AdminListings
+  /admin/categories         AdminCategories
+  /admin/disputes           AdminDisputes
+  /admin/settings           AdminSettings
+  /admin/reports            AdminReports
+
+--------------------------------------------------------------------------------
+10. KNOWN GAPS / FUTURE WORK
+--------------------------------------------------------------------------------
+
+  GAP-1   Email verification: The DB schema and emailService support email
+          verification (code + expiry columns), but the auth route does not
+          enforce it. New users are set is_email_verified = true by default.
+
+  GAP-2   Two-factor authentication: OTP columns exist in the users table
+          and the email service can send OTP messages, but the login flow
+          does not trigger a second-factor challenge.
+
+  GAP-3   Real-time bidding: Bid updates require a page refresh. There is no
+          WebSocket or Server-Sent Events connection; buyers must reload to
+          see new bids.
+
+  GAP-4   Outbid notifications: The notification table and type system support
+          "outbid" events, but the bid placement endpoint does not currently
+          insert an outbid notification for the previously leading bidder.
+
+  GAP-5   Payment processing: The platform calculates seller payouts and
+          commission but has no payment gateway integration. Payout is
+          informational only.
+
+  GAP-6   Relist functionality: The "no-bid" email suggests relisting, but
+          there is no one-click relist action in the seller UI.
+
+  GAP-7   Image management: Uploaded images are stored on local disk
+          (uploads/auctions/). There is no cloud storage (S3, etc.) and no
+          image deletion when an auction is removed.
+
+  GAP-8   Soft delete: User and auction deletes are hard deletes. auction_results
+          references are preserved (ON DELETE CASCADE on auctions, ON DELETE
+          SET NULL on users), but the audit trail for deleted users is lost.
+
+  GAP-9   Search: Full-text search uses ILIKE. For large datasets, a
+          PostgreSQL full-text search index or external search service would
+          improve performance.
+
+  GAP-10  Rate limiting: No API-level rate limiting is applied. A middleware
+          like express-rate-limit should be added before production.
+
+--------------------------------------------------------------------------------
+11. SEED / TEST DATA
+--------------------------------------------------------------------------------
+
+  Default accounts (created by seed.js):
+  - Admin:   admin@gavelpro.com / admin@123
+  - Sellers: seller1@demo.com, seller2@demo.com, seller3@demo.com / demo@123
+  - Buyers:  buyer1–5@demo.com / demo@123
+
+  Seeded data:
+  - 6 active categories
+  - ~60 historical ended auctions with realistic bid patterns
+  - 8 live auctions
+  - Default platform settings: CommissionRate=5, MinBidIncrement=10,
+    AuctionDurationDays=7
+
+================================================================================
+END OF DOCUMENT
+================================================================================
