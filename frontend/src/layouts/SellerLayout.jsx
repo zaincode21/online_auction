@@ -6,7 +6,7 @@ const navItems = [
   { to: '/seller/dashboard', icon: 'bi-speedometer2', label: 'Dashboard' },
   { to: '/seller/analytics', icon: 'bi-graph-up', label: 'Analytics' },
   { to: '/seller/my-auctions', icon: 'bi-hammer', label: 'My Auctions' },
-  { to: '/seller/create-auction', icon: 'bi-plus-circle', label: 'Create Auction' },
+  { to: '/seller/create-auction', icon: 'bi-plus-circle', label: 'Create Auction', accent: 'red' },
   { to: '/seller/profile', icon: 'bi-person', label: 'Profile' },
 ];
 
@@ -34,11 +34,17 @@ export default function SellerLayout() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-primary-50 text-primary-600'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`
+                item.accent === 'red'
+                  ? `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-red-600 text-white'
+                        : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white'
+                    }`
+                  : `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-primary-50 text-primary-600'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`
               }
             >
               <i className={`bi ${item.icon} text-base`} />
